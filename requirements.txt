@@ -1,0 +1,10 @@
+opencv-python-headless
+numpy
+moviepy
+google-genai
+streamlit
+python-dotenv
+pillow
+python-docx
+groq  
+ 
