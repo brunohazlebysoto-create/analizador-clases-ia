@@ -315,9 +315,7 @@ if uploaded_file is not None:
                 elif step_idx == 2:
                     total_progress = 0.30 + (step_progress * 0.30)
                 elif step_idx == 3:
-                    total_progress = 0.60 + (step_progress * 0.35)
-                elif step_idx == 4:
-                    total_progress = 0.95 + (step_progress * 0.05)
+                    total_progress = 0.60 + (step_progress * 0.40)
                 else:
                     total_progress = 1.0
                     
@@ -388,7 +386,7 @@ if uploaded_file is not None:
 
             # Paso 1: Extracción de Slides
             def step1_callback(val):
-                update_dashboard(step_idx=1, step_progress=val, status_message="🔄 Paso 1 de 4: Analizando estructura del video y extrayendo diapositivas...")
+                update_dashboard(step_idx=1, step_progress=val, status_message="🔄 Paso 1 de 3: Analizando estructura del video y extrayendo diapositivas...")
                 
             # Extraer diapositivas
             slides_data = processor.extract_slides(
@@ -417,25 +415,25 @@ if uploaded_file is not None:
                         )
                 
                 # Paso 2: Audio y Transcripción (Con Groq Whisper - Rápido)
-                update_dashboard(step_idx=2, step_progress=0.0, status_message="🔄 Paso 2 de 4: Iniciando extracción de audio...")
+                update_dashboard(step_idx=2, step_progress=0.0, status_message="🔄 Paso 2 de 3: Iniciando extracción de audio...")
                 from groq_service import GroqService
                 groq_svc = GroqService(api_key=groq_api_key_input)
                 
                 audio_path = os.path.join(temp_dir, "audio.mp3")
                 groq_svc.extract_audio(video_path, audio_path)
                 
-                update_dashboard(step_idx=2, step_progress=0.1, status_message="🔄 Paso 2 de 4: Audio extraído. Subiendo a Groq Whisper...")
+                update_dashboard(step_idx=2, step_progress=0.1, status_message="🔄 Paso 2 de 3: Audio extraído. Subiendo a Groq Whisper...")
                 
                 def transcribe_callback(step_val, msg):
                     adjusted_progress = 0.1 + (step_val * 0.9)
-                    update_dashboard(step_idx=2, step_progress=adjusted_progress, status_message=f"🔄 Paso 2 de 4: {msg}")
+                    update_dashboard(step_idx=2, step_progress=adjusted_progress, status_message=f"🔄 Paso 2 de 3: {msg}")
                 
                 transcript_segments = groq_svc.transcribe_audio(audio_path, progress_callback=transcribe_callback)
                 update_dashboard(step_idx=2, step_progress=1.0, status_message="✅ Paso 2 Completado: Transcripción de audio ultra-rápida exitosa.")
                 time.sleep(1)
                 
                 # Paso 3: Sincronizar y Sintetizar (Con Gemini Vision Batch - Sin alucinaciones)
-                update_dashboard(step_idx=3, step_progress=0.0, status_message="🔄 Paso 3 de 4: Preparando lotes para Google Gemini...")
+                update_dashboard(step_idx=3, step_progress=0.0, status_message="🔄 Paso 3 de 3: Preparando lotes para Google Gemini...")
                 from gemini_service import GeminiService
                 gemini_svc = GeminiService(api_key=gemini_api_key_input)
                 
@@ -463,7 +461,7 @@ if uploaded_file is not None:
                     update_dashboard(
                         step_idx=3, 
                         step_progress=(batch_idx - 1) / total_batches, 
-                        status_message=f"🔄 Paso 3 de 4: Gemini analizando Lote {batch_idx} de {total_batches} diapositivas (Evitando alucinaciones)..."
+                        status_message=f"🔄 Paso 3 de 3: Gemini analizando Lote {batch_idx} de {total_batches} diapositivas (Evitando alucinaciones)..."
                     )
                     
                     batch_results = gemini_svc.synthesize_slide_batch(batch)
@@ -496,24 +494,7 @@ if uploaded_file is not None:
                 # Guardar en sesión
                 st.session_state.slides_data = slides_data
                 st.session_state.report_title = report_title
-                
-                # Paso 4: Generar reporte Word
-                update_dashboard(step_idx=4, step_progress=0.0, status_message="🔄 Paso 4 de 4: Generando archivo Word (.docx)...")
-                
-                video_base_name = os.path.splitext(uploaded_file.name)[0]
-                docx_output_name = f"{video_base_name}.docx"
-                docx_path = os.path.join(temp_dir, docx_output_name)
-                
-                create_word_report(
-                    slides_data, 
-                    class_title=report_title, 
-                    output_filename=docx_path
-                )
-                
-                update_dashboard(step_idx=4, step_progress=1.0, status_message="✅ Paso 4 Completado: ¡Archivo Word generado con éxito!")
-                time.sleep(1)
-                
-                st.session_state.docx_path = docx_path
+                st.session_state.docx_path = None # Limpiar para forzar nueva compilación con ediciones
                 st.session_state.processed = True
                 st.session_state.processing = False
                 st.rerun()
@@ -528,21 +509,10 @@ if uploaded_file is not None:
 # Mostrar resultados si ya se procesaron
 if st.session_state.processed and st.session_state.slides_data:
     st.divider()
-    st.header("📊 Reporte Generado")
+    st.header("📊 Diapositivas y Explicaciones Generadas")
+    st.info("💡 Revisa y edita las explicaciones de cada diapositiva en los cuadros de texto. Cuando termines, utiliza el panel al final para generar el reporte Word (.docx) final.")
     
-    # Botón de descarga del Word
-    if st.session_state.docx_path and os.path.exists(st.session_state.docx_path):
-        with open(st.session_state.docx_path, "rb") as f:
-            st.download_button(
-                label="📥 Descargar Reporte Completo en Word (.docx)",
-                data=f,
-                file_name=f"{st.session_state.report_title}.docx",
-                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-            )
-            
-    st.write("---")
-    
-    # Mostrar resultados en pantalla
+    # Mostrar resultados en pantalla con campos editables
     for slide in st.session_state.slides_data:
         start_str = format_timestamp(slide["start_time"])
         end_str = format_timestamp(slide["end_time"])
@@ -558,6 +528,53 @@ if st.session_state.processed and st.session_state.slides_data:
         with col_img:
             st.image(slide["image_path"], use_container_width=True)
         with col_txt:
-            st.markdown("##### Explicación Integrada:")
-            st.markdown(slide["explanation"])
+            st.markdown("##### Explicación Integrada (Editable):")
+            # st.text_area actualiza directamente el valor en st.session_state.slides_data
+            edited_text = st.text_area(
+                f"Explicación de Diapositiva {slide['id']}",
+                value=slide["explanation"],
+                key=f"edit_slide_{slide['id']}",
+                height=250,
+                label_visibility="collapsed"
+            )
+            slide["explanation"] = edited_text
         st.write("")
+        
+    st.divider()
+    st.subheader("📄 Generación de Reporte Word Final")
+    
+    col_input, col_action = st.columns([3, 1])
+    with col_input:
+        report_title_input = st.text_input("Ajustar título del reporte si lo deseas:", value=st.session_state.report_title)
+        st.session_state.report_title = report_title_input
+    
+    st.write("")
+    
+    col_gen, col_download = st.columns([1, 1])
+    with col_gen:
+        if st.button("Compilar y Generar Reporte Word (.docx) 📝"):
+            temp_dir = tempfile.mkdtemp()
+            # Nombre de salida sanitizado
+            safe_title = "".join(c for c in st.session_state.report_title if c.isalnum() or c in (' ', '_', '-')).strip()
+            docx_output_name = f"{safe_title.replace(' ', '_')}.docx"
+            docx_path = os.path.join(temp_dir, docx_output_name)
+            
+            with st.spinner("Generando archivo Word..."):
+                create_word_report(
+                    st.session_state.slides_data, 
+                    class_title=st.session_state.report_title, 
+                    output_filename=docx_path
+                )
+            st.session_state.docx_path = docx_path
+            st.success("¡Archivo Word generado con éxito!")
+            st.rerun()
+            
+    with col_download:
+        if st.session_state.docx_path and os.path.exists(st.session_state.docx_path):
+            with open(st.session_state.docx_path, "rb") as f:
+                st.download_button(
+                    label="📥 Descargar Reporte en Word (.docx)",
+                    data=f,
+                    file_name=f"{st.session_state.report_title}.docx",
+                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                )
