@@ -234,7 +234,9 @@ if uploaded_file is not None:
         try:
             # Crear carpetas temporales para el procesamiento
             temp_dir = tempfile.mkdtemp()
-            video_path = os.path.join(temp_dir, uploaded_file.name)
+            # Sanitizar el nombre de archivo para prevenir path traversal
+            safe_filename = os.path.basename(uploaded_file.name)
+            video_path = os.path.join(temp_dir, safe_filename)
             
             with open(video_path, "wb") as f:
                 f.write(uploaded_file.getbuffer())
@@ -261,7 +263,6 @@ if uploaded_file is not None:
             st.write("---")
             st.markdown("### 📊 Panel de Control y Progreso en Tiempo Real")
             
-            # Contenedor con estilo premium de cristal y degradado sutil
             st.markdown("""
             <div style="background: linear-gradient(135deg, rgba(37, 99, 235, 0.05) 0%, rgba(6, 182, 212, 0.05) 100%); border: 1px solid rgba(37, 99, 235, 0.15); border-radius: 12px; padding: 20px; box-shadow: 0 4px 12px rgba(0,0,0,0.05); margin-bottom: 25px;">
             """, unsafe_allow_html=True)
@@ -327,7 +328,6 @@ if uploaded_file is not None:
                 # Estimar duración total del proceso
                 est_total = 0.0
                 if step_idx == 1:
-                    # Paso 1: Extracción de diapositivas
                     if step_progress > 0.01:
                         est_step1 = elapsed / step_progress
                     else:
@@ -337,7 +337,6 @@ if uploaded_file is not None:
                     est_step4 = 1.0
                     est_total = est_step1 + est_step2 + est_step3 + est_step4
                 elif step_idx == 2:
-                    # Paso 2: Audio y Transcripción
                     elapsed_in_step2 = now - times["step2_start"]
                     if step_progress > 0.01:
                         est_step2 = elapsed_in_step2 / step_progress
@@ -350,16 +349,14 @@ if uploaded_file is not None:
                     est_step4 = 1.0
                     est_total = times["step1_actual"] + est_step2 + est_step3 + est_step4
                 elif step_idx == 3:
-                    # Paso 3: Síntesis con Gemini
                     elapsed_in_step3 = now - times["step3_start"]
                     if step_progress > 0.01:
                         est_step3 = elapsed_in_step3 / step_progress
                     else:
-                        est_step3 = len(slides_data) * 4.5
+                        est_step3 = len(slides_data) * 4.5 if slides_data else max(3, video_duration / 45) * 4.5
                     est_step4 = 1.0
                     est_total = times["step1_actual"] + times["step2_actual"] + est_step3 + est_step4
                 elif step_idx == 4:
-                    # Paso 4: Exportación
                     est_total = times["step1_actual"] + times["step2_actual"] + times["step3_actual"] + 1.0
                 
                 remaining = max(0.0, est_total - elapsed)
@@ -416,7 +413,6 @@ if uploaded_file is not None:
                 
                 # Paso 2: Audio y Transcripción (Con Groq Whisper - Rápido)
                 update_dashboard(step_idx=2, step_progress=0.0, status_message="🔄 Paso 2 de 3: Iniciando extracción de audio...")
-                from groq_service import GroqService
                 groq_svc = GroqService(api_key=groq_api_key_input)
                 
                 audio_path = os.path.join(temp_dir, "audio.mp3")
@@ -442,8 +438,10 @@ if uploaded_file is not None:
                     # Filtrar segmentos de texto que correspondan al tiempo de la diapositiva
                     slide_transcript_parts = []
                     for seg in transcript_segments:
-                        if not (seg["end"] < slide["start_time"] or seg["start"] > slide["end_time"]):
-                            slide_transcript_parts.append(seg["text"])
+                        seg_start = seg.get("start", 0.0)
+                        seg_end = seg.get("end", float("inf"))
+                        if not (seg_end < slide["start_time"] or seg_start > slide["end_time"]):
+                            slide_transcript_parts.append(seg.get("text", "").strip())
                             
                     slide_transcript = " ".join(slide_transcript_parts)
                     if not slide_transcript.strip():
@@ -480,7 +478,6 @@ if uploaded_file is not None:
                             status_message=f"🔍 Agente Supervisor (Gemini) auditando y refinando Diapositiva {slide['id']}..."
                         )
                         
-                        # El Agente 2 (Gemini Supervisor) realiza la supervisión y edición multimodal directa
                         refined_explanation = gemini_svc.supervise_and_edit_text(slide["image_path"], raw_explanation, slide["transcript"])
                         slide["explanation"] = refined_explanation
                         
@@ -517,10 +514,9 @@ if st.session_state.processed and st.session_state.slides_data:
         start_str = format_timestamp(slide["start_time"])
         end_str = format_timestamp(slide["end_time"])
         
-        # Estructura visual de dos columnas en Streamlit
         st.markdown(f"""
         <div class="slide-card">
-            <h3>Diapositiva {slide['id']} <span class="timestamp-badge">{start_str} - {end_str}</span></h3>
+            <h3>Diapositiva {int(slide['id'])} <span class="timestamp-badge">{start_str} - {end_str}</span></h3>
         </div>
         """, unsafe_allow_html=True)
         
@@ -529,7 +525,6 @@ if st.session_state.processed and st.session_state.slides_data:
             st.image(slide["image_path"], use_container_width=True)
         with col_txt:
             st.markdown("##### Explicación Integrada (Editable):")
-            # st.text_area actualiza directamente el valor en st.session_state.slides_data
             edited_text = st.text_area(
                 f"Explicación de Diapositiva {slide['id']}",
                 value=slide["explanation"],
@@ -571,10 +566,14 @@ if st.session_state.processed and st.session_state.slides_data:
             
     with col_download:
         if st.session_state.docx_path and os.path.exists(st.session_state.docx_path):
-            with open(st.session_state.docx_path, "rb") as f:
+            try:
+                with open(st.session_state.docx_path, "rb") as f:
+                    docx_data = f.read()
                 st.download_button(
                     label="📥 Descargar Reporte en Word (.docx)",
-                    data=f,
+                    data=docx_data,
                     file_name=f"{st.session_state.report_title}.docx",
                     mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                 )
+            except OSError:
+                st.warning("El archivo generado ya no está disponible. Por favor, vuelve a compilar el reporte.")

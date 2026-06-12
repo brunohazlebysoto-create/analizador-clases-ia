@@ -1,7 +1,6 @@
 import os
+import re
 import time
-import subprocess
-import imageio_ffmpeg
 from google import genai
 from google.genai import types
 from PIL import Image
@@ -32,7 +31,7 @@ class GeminiService:
         Llama a la API de Gemini con reintentos automáticos ante errores 503 (Alta Demanda)
         y con fallback automático si el modelo principal no está disponible.
         """
-        models_to_try = ["gemini-3.5-flash"]
+        models_to_try = ["gemini-2.0-flash", "gemini-1.5-flash"]
         last_exception = None
         
         for model_name in models_to_try:
@@ -40,7 +39,6 @@ class GeminiService:
             delay = 2.0
             for attempt in range(retries):
                 try:
-                    # Llamar al modelo correspondiente
                     if config:
                         response = self.client.models.generate_content(
                             model=model_name,
@@ -69,51 +67,15 @@ class GeminiService:
                         "503", "429", "resource_exhausted", "unavailable", "demand", "limit"
                     ])
 
-                    
                     if is_temporary and attempt < retries - 1:
                         print(f"La API de Gemini está experimentando alta demanda en {model_name}. Reintentando en {delay} segundos...")
                         time.sleep(delay)
                         delay *= 2 # Backoff exponencial (2s -> 4s)
                     else:
-                        # Si no es un error temporal, o ya agotamos los reintentos, pasamos al siguiente modelo
                         print(f"Falló llamada con {model_name}: {err_msg}")
                         break
             
-        # Si llegamos aquí, ambos modelos fallaron definitivamente
         raise last_exception
-
-    def extract_audio(self, video_path, audio_output_path="extracted_audio.mp3"):
-        """Extrae el audio del video en formato MP3 con bajo bitrate usando ffmpeg directamente"""
-        print(f"Extrayendo audio de {video_path} usando ffmpeg...")
-        
-        if os.path.exists(audio_output_path):
-            try:
-                os.remove(audio_output_path)
-            except Exception:
-                pass
-                
-        ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
-        cmd = [
-            ffmpeg_exe,
-            "-i", video_path,
-            "-vn",
-            "-acodec", "libmp3lame",
-            "-ac", "1",
-            "-ab", "16k",
-            "-ar", "16000",
-            "-y",
-            audio_output_path
-        ]
-        
-        result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        if result.returncode != 0:
-            err_msg = result.stderr.decode("utf-8", errors="ignore")
-            raise IOError(f"Error al extraer audio con ffmpeg (código {result.returncode}):\n{err_msg}")
-            
-        print("Audio extraído exitosamente.")
-        return audio_output_path
-
-
 
     def synthesize_slide_batch(self, slides_batch):
         """
@@ -143,21 +105,27 @@ class GeminiService:
         )
         
         contents = [prompt]
+        opened_images = []
         
         for slide in slides_batch:
             slide_id = slide["id"]
             contents.append(f"\n\n--- DATOS DE LA DIAPOSITIVA {slide_id} ---")
-            contents.append(Image.open(slide["image_path"]))
+            img = Image.open(slide["image_path"])
+            img.load()  # Forzar carga en memoria antes de pasar al SDK
+            opened_images.append(img)
+            contents.append(img)
             contents.append(f"\nTranscripción del orador durante la Diapositiva {slide_id}:\n{slide['transcript']}\n")
             
-        # Generación (sin búsqueda en vivo para lotes grandes para evitar timeouts)
         config = types.GenerateContentConfig(temperature=0.2)
-        response = self._generate_content_with_fallback(contents=contents, config=config)
+        try:
+            response = self._generate_content_with_fallback(contents=contents, config=config)
+        finally:
+            for img in opened_images:
+                img.close()
         
         response_text = response.text
         results = {}
         
-        import re
         # Dividir por el marcador ===DIAPOSITIVA_ID_X===
         parts = re.split(r'===DIAPOSITIVA_ID_(\d+)===', response_text)
         
@@ -165,8 +133,9 @@ class GeminiService:
         for i in range(1, len(parts), 2):
             try:
                 s_id = int(parts[i])
-                s_content = parts[i+1].strip()
-                results[s_id] = s_content
+                if i + 1 < len(parts):
+                    s_content = parts[i + 1].strip()
+                    results[s_id] = s_content
             except ValueError:
                 pass
                 
@@ -237,10 +206,14 @@ class GeminiService:
         )
         
         try:
-            from PIL import Image
-            contents = [prompt, Image.open(image_path)]
-            response = self._generate_content_with_fallback(contents)
-            return response.text.strip()
+            img = Image.open(image_path)
+            img.load()  # Forzar carga en memoria
+            try:
+                contents = [prompt, img]
+                response = self._generate_content_with_fallback(contents)
+                return response.text.strip()
+            finally:
+                img.close()
         except Exception as e:
             print(f"Error en Supervisor Gemini: {e}")
             return draft_text

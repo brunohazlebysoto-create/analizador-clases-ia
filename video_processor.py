@@ -118,7 +118,7 @@ class VideoProcessor:
             if file.endswith(('.png', '.jpg', '.jpeg')):
                 try:
                     os.remove(os.path.join(self.output_dir, file))
-                except Exception:
+                except (OSError, FileNotFoundError):
                     pass
 
         t = 0.0
@@ -140,7 +140,6 @@ class VideoProcessor:
             frame_gray = cv2.cvtColor(frame_resized, cv2.COLOR_BGR2GRAY)
             
             # IGNORAR DIAPOSITIVAS EN NEGRO (Brillo promedio extremadamente bajo)
-            # 12.0 es ideal para evitar capturar pantallas negras de transición sin afectar diapositivas de modo oscuro
             if np.mean(frame_gray) < 12.0:
                 t += sample_interval
                 continue
@@ -168,10 +167,7 @@ class VideoProcessor:
                 diff = cv2.absdiff(frame_gray, last_saved_frame_gray)
                 mean_diff = np.mean(diff)
                 
-                # Si la diferencia supera el umbral, verificamos si es un cambio estable
                 if mean_diff > threshold:
-                    # Estabilidad: verificamos el frame un segundo después para asegurarnos
-                    # de que no es un cambio transitorio (ej. alguien caminando)
                     stable_t = min(t + sample_interval, duration - 0.1)
                     cap.set(cv2.CAP_PROP_POS_MSEC, int(stable_t * 1000))
                     ret_stable, frame_stable = cap.read()
@@ -180,26 +176,20 @@ class VideoProcessor:
                         stable_resized = cv2.resize(frame_stable, (640, 360))
                         stable_gray = cv2.cvtColor(stable_resized, cv2.COLOR_BGR2GRAY)
                         
-                        # Si el frame de estabilidad también es negro, lo ignoramos
                         if np.mean(stable_gray) < 12.0:
                             t += sample_interval
                             continue
                             
                         stable_gray = cv2.GaussianBlur(stable_gray, (5, 5), 0)
                         
-                        # Diferencia entre el frame actual y el de estabilidad
                         stable_diff = cv2.absdiff(frame_gray, stable_gray)
                         stable_mean_diff = np.mean(stable_diff)
                         
-                        # Si son muy similares, es estable. Si es inestable, lo ignoramos.
                         if stable_mean_diff < threshold * 0.5:
-                            # Aseguramos que duró lo suficiente la diapositiva anterior
                             duration_of_prev = t - last_saved_timestamp
                             if duration_of_prev >= min_slide_duration:
-                                # Actualizar el end_time de la diapositiva anterior
                                 slides[-1]["end_time"] = t
                                 
-                                # Guardar la nueva diapositiva
                                 slide_count += 1
                                 img_name = f"slide_{slide_count:03d}.png"
                                 img_path = os.path.join(self.output_dir, img_name)
@@ -216,7 +206,6 @@ class VideoProcessor:
                                     "end_time": duration
                                 })
             
-            # Avanzar el tiempo
             t += sample_interval
             
         cap.release()
@@ -233,7 +222,7 @@ class VideoProcessor:
                     try:
                         if os.path.exists(slide["image_path"]):
                             os.remove(slide["image_path"])
-                    except:
+                    except (OSError, FileNotFoundError):
                         pass
                     # Redistribuir el tiempo al slide anterior o posterior
                     if non_black_slides:
@@ -252,14 +241,12 @@ class VideoProcessor:
                 img1_gray = cv2.imread(current_slide["image_path"], cv2.IMREAD_GRAYSCALE)
                 img2_gray = cv2.imread(next_slide["image_path"], cv2.IMREAD_GRAYSCALE)
                 
-                # Si son similares (tolerancia a profesor en movimiento en la pantalla)
                 if are_images_similar(img1_gray, img2_gray, similarity_threshold=threshold, block_match_ratio=0.85):
-                    # Fusionar tiempos (ampliar el actual)
                     current_slide["end_time"] = next_slide["end_time"]
                     try:
                         if os.path.exists(next_slide["image_path"]):
                             os.remove(next_slide["image_path"])
-                    except:
+                    except (OSError, FileNotFoundError):
                         pass
                 else:
                     merged_slides.append(current_slide)
@@ -270,7 +257,6 @@ class VideoProcessor:
         # PASO 3 POST-PROCESAMIENTO: Asegurar continuidad del timeline y límites sin vacíos
         if slides:
             slides[0]["start_time"] = 0.0
-            # Conectar el fin de cada slide exactamente con el inicio del siguiente
             for idx in range(len(slides) - 1):
                 slides[idx]["end_time"] = slides[idx + 1]["start_time"]
             slides[-1]["end_time"] = duration
