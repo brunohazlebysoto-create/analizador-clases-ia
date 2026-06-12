@@ -5,13 +5,7 @@ from docx.shared import Inches, Pt, RGBColor
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
-
-def format_timestamp(seconds):
-    """Convierte segundos a formato hh:mm:ss"""
-    h = int(seconds // 3600)
-    m = int((seconds % 3600) // 60)
-    s = int(seconds % 60)
-    return f"{h:02d}:{m:02d}:{s:02d}"
+from video_processor import format_timestamp
 
 def set_cell_background(cell, hex_color):
     """Establece el color de fondo de una celda de tabla en Word"""
