@@ -72,11 +72,9 @@ class GeminiService:
                         time.sleep(delay)
                         delay *= 2 # Backoff exponencial (2s -> 4s)
                     else:
-                        # Si no es un error temporal, o ya agotamos los reintentos, pasamos al siguiente modelo
                         print(f"Falló llamada con {model_name}: {err_msg}")
                         break
             
-        # Si llegamos aquí, ambos modelos fallaron definitivamente
         raise last_exception
 
     def synthesize_slide_batch(self, slides_batch):
@@ -107,15 +105,23 @@ class GeminiService:
         )
         
         contents = [prompt]
+        opened_images = []
         
         for slide in slides_batch:
             slide_id = slide["id"]
             contents.append(f"\n\n--- DATOS DE LA DIAPOSITIVA {slide_id} ---")
-            contents.append(Image.open(slide["image_path"]))
+            img = Image.open(slide["image_path"])
+            img.load()  # Forzar carga en memoria antes de pasar al SDK
+            opened_images.append(img)
+            contents.append(img)
             contents.append(f"\nTranscripción del orador durante la Diapositiva {slide_id}:\n{slide['transcript']}\n")
             
         config = types.GenerateContentConfig(temperature=0.2)
-        response = self._generate_content_with_fallback(contents=contents, config=config)
+        try:
+            response = self._generate_content_with_fallback(contents=contents, config=config)
+        finally:
+            for img in opened_images:
+                img.close()
         
         response_text = response.text
         results = {}
@@ -127,8 +133,9 @@ class GeminiService:
         for i in range(1, len(parts), 2):
             try:
                 s_id = int(parts[i])
-                s_content = parts[i+1].strip()
-                results[s_id] = s_content
+                if i + 1 < len(parts):
+                    s_content = parts[i + 1].strip()
+                    results[s_id] = s_content
             except ValueError:
                 pass
                 
@@ -199,9 +206,14 @@ class GeminiService:
         )
         
         try:
-            contents = [prompt, Image.open(image_path)]
-            response = self._generate_content_with_fallback(contents)
-            return response.text.strip()
+            img = Image.open(image_path)
+            img.load()  # Forzar carga en memoria
+            try:
+                contents = [prompt, img]
+                response = self._generate_content_with_fallback(contents)
+                return response.text.strip()
+            finally:
+                img.close()
         except Exception as e:
             print(f"Error en Supervisor Gemini: {e}")
             return draft_text
