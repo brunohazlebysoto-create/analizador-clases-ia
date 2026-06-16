@@ -1,0 +1,23 @@
+name: Sync to Hugging Face Spaces
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  sync-to-hf:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          lfs: true
+
+      - name: Push to HF Space
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          git config --global user.email "brunohazlebysoto@gmail.com"
+          git config --global user.name "BrunoEduardo"
+          git remote add hf https://BrunoEduardo:${HF_TOKEN}@huggingface.co/spaces/BrunoEduardo/analizador-clases-ia
+          git push hf main --force
