@@ -1,10 +1,11 @@
 opencv-python-headless
 numpy
 moviepy
+imageio-ffmpeg
 google-genai
 streamlit
 python-dotenv
 pillow
 python-docx
-groq  
- 
+groq
+pydantic
