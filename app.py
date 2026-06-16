@@ -1,4 +1,5 @@
 import os
+import shutil
 import streamlit as st
 import tempfile
 import time
@@ -122,6 +123,8 @@ if "error_message" not in st.session_state:
     st.session_state.error_message = None
 if "processing" not in st.session_state:
     st.session_state.processing = False
+if "temp_dir" not in st.session_state:
+    st.session_state.temp_dir = None
 
 # Sidebar - Configuración y API Key
 with st.sidebar:
@@ -146,7 +149,14 @@ with st.sidebar:
     )
     
     st.divider()
-    
+
+    st.subheader("🌐 Idioma del Video")
+    language_options = {"Español": "es", "English": "en", "Português": "pt", "Français": "fr"}
+    selected_language_label = st.selectbox("Idioma hablado en el video", list(language_options.keys()))
+    transcription_language = language_options[selected_language_label]
+
+    st.divider()
+
     st.subheader("⚡ Modo de Procesamiento")
     is_turbo_mode = st.toggle(
         "Modo Turbo (Sin esperas)", 
@@ -217,6 +227,10 @@ if uploaded_file is not None:
         if not groq_api_key_input or not gemini_api_key_input:
             st.error("Por favor, introduce las API Keys de Groq y de Gemini válidas en la barra lateral.")
         else:
+            # Limpiar directorio temporal de la sesión anterior
+            if st.session_state.temp_dir and os.path.exists(st.session_state.temp_dir):
+                shutil.rmtree(st.session_state.temp_dir, ignore_errors=True)
+                st.session_state.temp_dir = None
             st.session_state.processing = True
             st.session_state.report_title = report_title
             st.session_state.processed = False
@@ -234,8 +248,9 @@ if uploaded_file is not None:
         try:
             # Crear carpetas temporales para el procesamiento
             temp_dir = tempfile.mkdtemp()
+            st.session_state.temp_dir = temp_dir
             video_path = os.path.join(temp_dir, uploaded_file.name)
-            
+
             with open(video_path, "wb") as f:
                 f.write(uploaded_file.getbuffer())
                 
@@ -428,7 +443,7 @@ if uploaded_file is not None:
                     adjusted_progress = 0.1 + (step_val * 0.9)
                     update_dashboard(step_idx=2, step_progress=adjusted_progress, status_message=f"🔄 Paso 2 de 3: {msg}")
                 
-                transcript_segments = groq_svc.transcribe_audio(audio_path, progress_callback=transcribe_callback)
+                transcript_segments = groq_svc.transcribe_audio(audio_path, progress_callback=transcribe_callback, language=transcription_language)
                 update_dashboard(step_idx=2, step_progress=1.0, status_message="✅ Paso 2 Completado: Transcripción de audio ultra-rápida exitosa.")
                 time.sleep(1)
                 
